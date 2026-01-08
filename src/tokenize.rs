@@ -53,7 +53,7 @@ pub enum TokenConstant {
     /// Enumeration constant (identifier)
     Enumeration(String),
     /// Character constant (`L?'([^'\\\n]|\\['"?\\abfnrtv]|\\[0-7]{1,3}|\x[0-9A-Fa-f]+)+'`)
-    Character(String),
+    Character(Vec<u8>),
 }
 
 /// Punctuators, as defined in Section 6.4.6 of the C99 standard draft (N1256, page 63)
@@ -175,7 +175,7 @@ pub enum Token {
     /// String literal, as defined in Section 6.4.5 of the C99 standard draft (N1256, page 62)
     /// The `bool` value is true if the string literal is a wide string literal
     /// Defined as `L?"([^'\\\n]|\\['"?\\abfnrtv]|\\[0-7]{1,3}|\x[0-9A-Fa-f]+)+"`
-    StringLiteral(String, bool),
+    StringLiteral(Vec<u8>, bool),
 
     /// Punctuator, as defined in Section 6.4.6 of the C99 standard draft (N1256, page 63)
     Punctuator(TokenPunctuator),
@@ -220,9 +220,17 @@ pub enum PreprocessingToken {
     NonWhitespace,
 }
 
+enum TokenizationIssue {
+    UnknownEscapeSequence(String),
+    UnterminatedString,
+    OutOfRange,
+    MissingHexadecimalDigits,
+}
+
 struct Tokenizer {
     source: Vec<char>,
     index: usize,
+    emitted_issues: Vec<(usize, TokenizationIssue)>,
 }
 
 impl Tokenizer {
@@ -231,6 +239,7 @@ impl Tokenizer {
         Self {
             source: source.chars().collect(),
             index: 0,
+            emitted_issues: Vec::new(),
         }
     }
 
@@ -295,6 +304,137 @@ impl Tokenizer {
         }
     }
 
+    fn next_hex_digit_sequence(&mut self) -> Option<String> {
+        let mut sequence = String::new();
+        while let Some(next_character) = self.next_character() {
+            match next_character {
+                digit @ 'a'..='f' | digit @ 'A'..='F' | digit @ '0'..='9' => sequence.push(digit),
+                _ => {
+                    self.index -= 1;
+                    break;
+                }
+            };
+        }
+        if sequence.is_empty() {
+            None
+        } else {
+            Some(sequence)
+        }
+    }
+
+    fn next_string(&mut self, end: char) -> Vec<u8> {
+        let mut string: Vec<u8> = Vec::new();
+
+        while let Some(next_character) = self.next_character() {
+            match next_character {
+                '\\' => match self.peek(0) {
+                    Some('\'') => {
+                        string.push('\'' as u8);
+                    }
+                    Some('"') => {
+                        string.push('"' as u8);
+                    }
+                    Some('?') => {
+                        string.push('?' as u8);
+                    }
+                    Some('\\') => {
+                        string.push('\\' as u8);
+                    }
+                    Some('a') => {
+                        string.push(0x07);
+                    }
+                    Some('b') => {
+                        string.push(0x08);
+                    }
+                    Some('f') => {
+                        string.push(0x0c);
+                    }
+                    Some('n') => {
+                        string.push('\n' as u8);
+                    }
+                    Some('r') => {
+                        string.push('\r' as u8);
+                    }
+                    Some('t') => {
+                        string.push('\t' as u8);
+                    }
+                    Some('v') => {
+                        string.push(0x0b);
+                    }
+                    Some(digit1 @ '0'..'7') => match self.peek(0) {
+                        // TODO: bounds checking
+                        Some(digit2 @ '0'..'7') => {
+                            self.index += 1;
+                            match self.peek(1) {
+                                Some(digit3 @ '0'..'7') => {
+                                    self.index += 1;
+                                    if let Ok(char) =
+                                        u8::from_str_radix(&format!("{digit1}{digit2}{digit3}"), 8)
+                                    {
+                                        string.push(char);
+                                    } else {
+                                        self.emitted_issues
+                                            .push((self.index, TokenizationIssue::OutOfRange))
+                                    }
+                                }
+                                _ => {
+                                    if let Ok(char) =
+                                        u8::from_str_radix(&format!("{digit1}{digit2}"), 8)
+                                    {
+                                        string.push(char);
+                                    } else {
+                                        self.emitted_issues
+                                            .push((self.index, TokenizationIssue::OutOfRange))
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            if let Ok(char) = u8::from_str_radix(&format!("{digit1}"), 8) {
+                                string.push(char);
+                            } else {
+                                self.emitted_issues
+                                    .push((self.index, TokenizationIssue::OutOfRange))
+                            }
+                        }
+                    },
+                    Some('x') => {
+                        if let Some(sequence) = self.next_hex_digit_sequence() {
+                            if sequence.len() > 2 {
+                                self.emitted_issues
+                                    .push((self.index, TokenizationIssue::OutOfRange));
+                            } else {
+                                string.push(u8::from_str_radix(&sequence, 16).unwrap());
+                            }
+                        } else {
+                            self.emitted_issues
+                                .push((self.index, TokenizationIssue::MissingHexadecimalDigits));
+                        }
+                    }
+                    Some(other) => {
+                        self.emitted_issues.push((
+                            self.index - 1,
+                            TokenizationIssue::UnknownEscapeSequence(format!("\\{}", other)),
+                        ));
+                        let mut dst_buf = [0; 4];
+                        string.extend_from_slice(other.encode_utf8(&mut dst_buf).as_bytes());
+                    }
+                    None => {
+                        self.emitted_issues
+                            .push((self.index - 1, TokenizationIssue::UnterminatedString));
+                        break;
+                    }
+                },
+                a if a == end => break,
+                other => {
+                    let mut dst_buf = [0; 4];
+                    string.extend_from_slice(other.encode_utf8(&mut dst_buf).as_bytes());
+                }
+            };
+        }
+        return string;
+    }
+
     pub fn next_token(&mut self) -> Option<Token> {
         self.skip_whitespace();
         if let Some(next_character) = self.next_character() {
@@ -306,7 +446,7 @@ impl Tokenizer {
                 '{' => Some(Token::Punctuator(TokenPunctuator::LeftBrace)),
                 '}' => Some(Token::Punctuator(TokenPunctuator::RightBrace)),
                 '.' => {
-                    if self.peek(1) == Some('.') && self.peek(2) == Some('.') {
+                    if self.peek(0) == Some('.') && self.peek(1) == Some('.') {
                         self.index += 2;
                         Some(Token::Punctuator(TokenPunctuator::Ellipsis))
                     } else {
@@ -315,7 +455,7 @@ impl Tokenizer {
                 }
                 '-' => {
                     self.index += 1;
-                    match self.peek(1) {
+                    match self.peek(0) {
                         Some('>') => Some(Token::Punctuator(TokenPunctuator::Arrow)),
                         Some('-') => Some(Token::Punctuator(TokenPunctuator::Decrement)),
                         Some('=') => Some(Token::Punctuator(TokenPunctuator::MinusAssign)),
@@ -327,7 +467,7 @@ impl Tokenizer {
                 }
                 '+' => {
                     self.index += 1;
-                    match self.peek(1) {
+                    match self.peek(0) {
                         Some('+') => Some(Token::Punctuator(TokenPunctuator::Increment)),
                         Some('=') => Some(Token::Punctuator(TokenPunctuator::PlusAssign)),
                         _ => {
@@ -338,7 +478,7 @@ impl Tokenizer {
                 }
                 '&' => {
                     self.index += 1;
-                    match self.peek(1) {
+                    match self.peek(0) {
                         Some('&') => Some(Token::Punctuator(TokenPunctuator::BooleanAnd)),
                         Some('=') => Some(Token::Punctuator(TokenPunctuator::BitwiseAndAssign)),
                         _ => {
@@ -349,7 +489,7 @@ impl Tokenizer {
                 }
                 '*' => {
                     self.index += 1;
-                    match self.peek(1) {
+                    match self.peek(0) {
                         Some('=') => Some(Token::Punctuator(TokenPunctuator::AsteriskAssign)),
                         _ => {
                             self.index -= 1;
@@ -360,7 +500,7 @@ impl Tokenizer {
                 '~' => Some(Token::Punctuator(TokenPunctuator::Tilde)),
                 '!' => {
                     self.index += 1;
-                    match self.peek(1) {
+                    match self.peek(0) {
                         Some('=') => Some(Token::Punctuator(TokenPunctuator::NotEquality)),
                         _ => {
                             self.index -= 1;
@@ -370,7 +510,7 @@ impl Tokenizer {
                 }
                 '/' => {
                     self.index += 1;
-                    match self.peek(1) {
+                    match self.peek(0) {
                         Some('=') => Some(Token::Punctuator(TokenPunctuator::SlashAssign)),
                         _ => {
                             self.index -= 1;
@@ -378,25 +518,127 @@ impl Tokenizer {
                         }
                     }
                 }
-                '%' => match self.peek(1) {},
+                '%' => match self.peek(0) {
+                    Some('=') => {
+                        self.index += 1;
+                        Some(Token::Punctuator(TokenPunctuator::PercentAssign))
+                    }
+                    Some('>') => {
+                        self.index += 1;
+                        Some(Token::Punctuator(TokenPunctuator::RightBrace))
+                    }
+                    Some(':') => {
+                        if self.peek(1) == Some('%') && self.peek(2) == Some(':') {
+                            self.index += 3;
+                            Some(Token::Punctuator(TokenPunctuator::DoubleHash))
+                        } else {
+                            self.index += 1;
+                            Some(Token::Punctuator(TokenPunctuator::Hash))
+                        }
+                    }
+                    _ => Some(Token::Punctuator(TokenPunctuator::Percent)),
+                },
+                '>' => match self.peek(0) {
+                    Some('>') => {
+                        self.index += 1;
+                        if self.peek(1) == Some('=') {
+                            self.index += 1;
+                            Some(Token::Punctuator(TokenPunctuator::ShiftRightAssign))
+                        } else {
+                            Some(Token::Punctuator(TokenPunctuator::ShiftRight))
+                        }
+                    }
+                    Some('=') => Some(Token::Punctuator(TokenPunctuator::GreaterEqual)),
+                    _ => Some(Token::Punctuator(TokenPunctuator::Greater)),
+                },
+                '<' => match self.peek(0) {
+                    Some('<') => {
+                        self.index += 1;
+                        if self.peek(1) == Some('=') {
+                            self.index += 1;
+                            Some(Token::Punctuator(TokenPunctuator::ShiftLeftAssign))
+                        } else {
+                            Some(Token::Punctuator(TokenPunctuator::ShiftLeft))
+                        }
+                    }
+                    Some('=') => {
+                        self.index += 1;
+                        Some(Token::Punctuator(TokenPunctuator::LessEqual))
+                    }
+                    Some(':') => {
+                        self.index += 1;
+                        Some(Token::Punctuator(TokenPunctuator::LeftBracket))
+                    }
+                    Some('%') => {
+                        self.index += 1;
+                        Some(Token::Punctuator(TokenPunctuator::LeftBrace))
+                    }
+                    _ => Some(Token::Punctuator(TokenPunctuator::Less)),
+                },
+                '=' => match self.peek(0) {
+                    Some('=') => {
+                        self.index += 1;
+                        Some(Token::Punctuator(TokenPunctuator::Equality))
+                    }
+                    _ => Some(Token::Punctuator(TokenPunctuator::Equal)),
+                },
+                '^' => match self.peek(0) {
+                    Some('=') => {
+                        self.index += 1;
+                        Some(Token::Punctuator(TokenPunctuator::BitwiseXorAssign))
+                    }
+                    _ => Some(Token::Punctuator(TokenPunctuator::Caret)),
+                },
+                '|' => match self.peek(0) {
+                    Some('=') => {
+                        self.index += 1;
+                        Some(Token::Punctuator(TokenPunctuator::BitwiseOrAssign))
+                    }
+                    Some('|') => {
+                        self.index += 1;
+                        Some(Token::Punctuator(TokenPunctuator::BooleanOr))
+                    }
+                    _ => Some(Token::Punctuator(TokenPunctuator::BitwiseOrAssign)),
+                },
+                '?' => Some(Token::Punctuator(TokenPunctuator::Question)),
+                ':' => match self.peek(0) {
+                    Some('>') => {
+                        self.index += 1;
+                        Some(Token::Punctuator(TokenPunctuator::RightBracket))
+                    }
+                    _ => Some(Token::Punctuator(TokenPunctuator::Colon)),
+                },
+                ';' => Some(Token::Punctuator(TokenPunctuator::Semicolon)),
+                '#' => match self.peek(0) {
+                    Some('#') => {
+                        self.index += 1;
+                        Some(Token::Punctuator(TokenPunctuator::DoubleHash))
+                    }
+                    _ => Some(Token::Punctuator(TokenPunctuator::Hash)),
+                },
+                ',' => Some(Token::Punctuator(TokenPunctuator::Comma)),
+                '"' => {
+                    let str = self.next_string('"');
+                    Some(Token::StringLiteral(str, false))
+                }
+                '\'' => {
+                    let str = self.next_string('\'');
+                    Some(Token::Constant(TokenConstant::Character(str)))
+                }
+                _ => None,
             }
         } else {
             None
         }
     }
-    pub fn next_preprocessing_token() -> PreprocessingToken {}
+    // pub fn next_preprocessing_token() -> PreprocessingToken {}
 }
 
-// todo
-//
-//
-// % << >> < > <= >= == ^ | ||
-// ? : ; ...
-// = %= <<= >>= ^= |=
-// , # ##
-// <: :> <% %> %: %:%:
+//fn preprocess_tokenize(source: &str) -> Vec<PreprocessingToken> {}
+pub fn tokenize(source: &str) -> Vec<Token> {
+    let mut out_vec = Vec::new();
 
-fn preprocess_tokenize(source: &str) -> Vec<PreprocessingToken> {}
-fn tokenize(source: &str) -> Vec<Token> {}
+    out_vec
+}
 
-fn process_tokens() {}
+//fn process_tokens() {}
