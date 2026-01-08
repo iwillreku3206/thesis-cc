@@ -1,6 +1,7 @@
 use std::str::Chars;
 
 /// Keywords, as defined in Section 6.4.1 of the C99 standard draft (N1256, page 50)
+#[derive(Debug)]
 pub enum TokenKeyword {
     Auto,
     Break,
@@ -42,6 +43,7 @@ pub enum TokenKeyword {
 }
 
 /// Constants, as defined in Section 6.4.4 of the C99 standard draft (N1256, page 54)
+#[derive(Debug)]
 pub enum TokenConstant {
     /// Decimal constant (`[1-9][0-9]*`), octal constant (`0[0-7]*`) or hexadecimal constant (`0x|X[0-9a-fA-F]+`)
     /// followed by an optional suffix (`(([uU][lL]{1,2})|([lL]{1,2}[uU]))+`)
@@ -57,6 +59,7 @@ pub enum TokenConstant {
 }
 
 /// Punctuators, as defined in Section 6.4.6 of the C99 standard draft (N1256, page 63)
+#[derive(Debug)]
 pub enum TokenPunctuator {
     /// The `[` or `<:` symbol
     LeftBracket,
@@ -161,6 +164,7 @@ pub enum TokenPunctuator {
     DoubleHash,
 }
 
+#[derive(Debug)]
 pub enum Token {
     /// Keyword, as defined in Section 6.4.1 of the C99 standard draft (N1256, page 50)
     Keyword(TokenKeyword),
@@ -181,6 +185,7 @@ pub enum Token {
     Punctuator(TokenPunctuator),
 }
 
+#[derive(Debug)]
 pub enum PPNumberToken {
     /// Decimal constant (`[1-9][0-9]*`), octal constant (`0[0-7]*`) or hexadecimal constant (`0x|X[0-9a-fA-F]+`)
     /// followed by an optional suffix (`(([uU][lL]{1,2})|([lL]{1,2}[uU]))+`)
@@ -191,6 +196,7 @@ pub enum PPNumberToken {
     Floating(String),
 }
 
+#[derive(Debug)]
 pub enum PreprocessingToken {
     /// Header name, as defined in Section 6.4.7 of the C99 standard draft (N1256, page 64)
     /// Defined as `(<[^>\n]+>)|("[^"\n]+")`
@@ -220,6 +226,7 @@ pub enum PreprocessingToken {
     NonWhitespace,
 }
 
+#[derive(Debug)]
 enum TokenizationIssue {
     UnknownEscapeSequence(String),
     UnterminatedString,
@@ -227,6 +234,7 @@ enum TokenizationIssue {
     MissingHexadecimalDigits,
 }
 
+#[derive(Debug)]
 struct Tokenizer {
     source: Vec<char>,
     index: usize,
@@ -637,6 +645,11 @@ impl Tokenizer {
 //fn preprocess_tokenize(source: &str) -> Vec<PreprocessingToken> {}
 pub fn tokenize(source: &str) -> Vec<Token> {
     let mut out_vec = Vec::new();
+    let mut tokenizer = Tokenizer::new(source);
+
+    while let Some(token) = tokenizer.next_token() {
+        out_vec.push(token);
+    }
 
     out_vec
 }
