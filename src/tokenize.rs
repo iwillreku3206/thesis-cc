@@ -47,7 +47,7 @@ pub enum TokenKeyword {
 pub enum TokenConstant {
     /// Decimal constant (`[1-9][0-9]*`), octal constant (`0[0-7]*`) or hexadecimal constant (`0x|X[0-9a-fA-F]+`)
     /// followed by an optional suffix (`(([uU][lL]{1,2})|([lL]{1,2}[uU]))+`)
-    Integer(String),
+    Integer(u64),
     /// Decimal floating constant (`(([0-9]*\.[0-9]+([eE][0-9]+)?)|([0-9]+[eE][0-9]+))[fFlL]`), or
     /// Hexadecimal floating constant
     /// (`0x(([0-9A-Fa-f]*\.[0-9A-Fa-f]+)|([0-9A-Fa-f]*\.))p[\+\-]?[0-9A-Fa-f]*[flFL]?`)
@@ -232,6 +232,14 @@ enum TokenizationIssue {
     UnterminatedString,
     OutOfRange,
     MissingHexadecimalDigits,
+    HexadecimalFloatWithoutExponent,
+}
+
+#[derive(Debug)]
+enum NumericalSuffix {
+    Unsigned,
+    Long,
+    LongLong,
 }
 
 #[derive(Debug)]
@@ -272,13 +280,6 @@ impl Tokenizer {
         self.source.get(self.index + offset).map(|x| *x)
     }
 
-    /// Iterates to the next character
-    fn next_character(&mut self) -> Option<char> {
-        let char = self.source.get(self.index).map(|x| *x);
-        self.index += 1;
-        char
-    }
-
     /// Consumes until the next `*/`
     fn skip_comment(&mut self) {
         while let Some(current_char) = self.next_character() {
@@ -294,6 +295,13 @@ impl Tokenizer {
                 _ => continue,
             };
         }
+    }
+
+    /// Iterates to the next character
+    fn next_character(&mut self) -> Option<char> {
+        let char = self.source.get(self.index).map(|x| *x);
+        self.index += 1;
+        char
     }
 
     /// Consumes the next word (`[A-Za-z]`)
@@ -330,6 +338,65 @@ impl Tokenizer {
         }
     }
 
+    fn next_oct_digit_sequence(&mut self) -> Option<String> {
+        let mut sequence = String::new();
+        while let Some(next_character) = self.next_character() {
+            match next_character {
+                digit @ '0'..='7' => sequence.push(digit),
+                _ => {
+                    self.index -= 1;
+                    break;
+                }
+            };
+        }
+        if sequence.is_empty() {
+            None
+        } else {
+            Some(sequence)
+        }
+    }
+
+    fn next_dec_digit_sequence(&mut self) -> Option<String> {
+        let mut sequence = String::new();
+        while let Some(next_character) = self.next_character() {
+            match next_character {
+                digit @ '0'..='9' => sequence.push(digit),
+                _ => {
+                    self.index -= 1;
+                    break;
+                }
+            };
+        }
+        if sequence.is_empty() {
+            None
+        } else {
+            Some(sequence)
+        }
+    }
+
+    fn next_num_suffix(&mut self) -> Option<NumericalSuffix> {
+        if let Some(next_character) = self.next_character() {
+            match next_character {
+                suffix @ 'l' | suffix @ 'L' => {
+                    if let Some(next_suffix) = self.peek(0)
+                        && next_suffix == suffix
+                    {
+                        self.index += 1;
+                        return Some(NumericalSuffix::LongLong);
+                    }
+                    return Some(NumericalSuffix::Long);
+                }
+                'u' | 'U' => {
+                    return Some(NumericalSuffix::Unsigned);
+                }
+                _ => {
+                    self.index -= 1;
+                }
+            }
+        }
+        return None;
+    }
+
     fn next_string(&mut self, end: char) -> Vec<u8> {
         let mut string: Vec<u8> = Vec::new();
 
@@ -337,36 +404,47 @@ impl Tokenizer {
             match next_character {
                 '\\' => match self.peek(0) {
                     Some('\'') => {
+                        self.index += 1;
                         string.push('\'' as u8);
                     }
                     Some('"') => {
+                        self.index += 1;
                         string.push('"' as u8);
                     }
                     Some('?') => {
+                        self.index += 1;
                         string.push('?' as u8);
                     }
                     Some('\\') => {
+                        self.index += 1;
                         string.push('\\' as u8);
                     }
                     Some('a') => {
+                        self.index += 1;
                         string.push(0x07);
                     }
                     Some('b') => {
+                        self.index += 1;
                         string.push(0x08);
                     }
                     Some('f') => {
+                        self.index += 1;
                         string.push(0x0c);
                     }
                     Some('n') => {
+                        self.index += 1;
                         string.push('\n' as u8);
                     }
                     Some('r') => {
+                        self.index += 1;
                         string.push('\r' as u8);
                     }
                     Some('t') => {
+                        self.index += 1;
                         string.push('\t' as u8);
                     }
                     Some('v') => {
+                        self.index += 1;
                         string.push(0x0b);
                     }
                     Some(digit1 @ '0'..'7') => match self.peek(0) {
@@ -443,6 +521,178 @@ impl Tokenizer {
         return string;
     }
 
+    fn next_number_constant(&mut self, char: char) -> Option<TokenConstant> {
+        let mut characters_peeked = 0;
+        match char {
+            '0' => {
+                characters_peeked += 1;
+                match self.peek(0) {
+                    Some('x') | Some('X') => {
+                        let mut is_float = false;
+                        let mut has_whole_part = true;
+                        let mut has_fractional_part = false;
+                        let mut exponent_part_is_negative = false;
+                        let mut parts = Vec::new();
+
+                        self.index += 1;
+
+                        // Consume the '.', if any, from the start of the number
+                        if self.peek(0) == Some('.') {
+                            has_whole_part = false;
+                            has_fractional_part = true;
+                            is_float = true;
+                            self.index += 1;
+                        }
+
+                        // Consume the whole part, or fractional part if the number has no whole
+                        // part
+                        parts.push(self.next_hex_digit_sequence()?);
+
+                        // Consume the '.' after a digit sequence
+                        if self.peek(0) == Some('.') && has_whole_part {
+                            is_float = true;
+                            self.index += 1;
+                        }
+
+                        // If there are digits after the '.', consume them
+                        if let Some(next) = self.peek(0)
+                            && next.is_ascii_hexdigit()
+                        {
+                            has_fractional_part = true;
+                            parts.push(self.next_hex_digit_sequence()?);
+                        }
+
+                        if is_float {
+                            // Consume exponent delimiter
+                            match self.peek(0) {
+                                Some('p') | Some('P') => self.index += 1,
+                                _ => {
+                                    self.emitted_issues.push((
+                                        self.index,
+                                        TokenizationIssue::HexadecimalFloatWithoutExponent,
+                                    ));
+                                    self.index += 1;
+                                    return None;
+                                }
+                            };
+                            // Consume sign of exponent
+                            match self.peek(0) {
+                                Some('+') => self.index += 1,
+                                Some('-') => {
+                                    self.index += 1;
+                                    exponent_part_is_negative = true;
+                                }
+                                _ => {}
+                            };
+
+                            // Consume exponent
+                            if let Some(exponent) = self.next_dec_digit_sequence() {
+                                parts.push(exponent);
+                            } else {
+                                self.emitted_issues.push((
+                                    self.index,
+                                    TokenizationIssue::HexadecimalFloatWithoutExponent,
+                                ));
+                                return None;
+                            };
+                        }
+
+                        // Construct float/int
+                        if is_float {
+							return None; // TODO: Implement
+                        } else {
+                            return Some(TokenConstant::Integer(
+                                u64::from_str_radix(parts.get(0)?, 16)
+                                    .expect("This should be a valid integer. Report this."),
+                            ));
+                        };
+                    }
+                    _ => {
+                        return Some(TokenConstant::Integer(
+                            u64::from_str_radix(
+                                &self.next_oct_digit_sequence().unwrap_or("0".into()),
+                                8,
+                            ) // TODO: Suffix
+                            .expect("This should be a valid integer. Report this."),
+                        ));
+                    }
+                }
+            }
+            first @ '1'..='9' => {
+                /* dec */
+                let mut str = String::from(char);
+                let digits = self.next_dec_digit_sequence();
+                if self.peek(0) == Some('.')
+                    || self.peek(0) == Some('e')
+                    || self.peek(0) == Some('E')
+                {
+					return None; // TODO: implement
+                    /* float_dec */
+                } else {
+					return Some(TokenConstant::Integer(u64::from_str_radix(&format!("{}{}", first, digits?), 10).expect("This should be a valid integer. Report this."))); // TODO: Suffix
+                }
+            }
+            '.' => { return None; /* float_dec*/ } // TODO: implement
+            _ => return None,
+        };
+    }
+
+	fn next_keyword_or_identifier(&mut self, last_char: char) -> Option<Token> {
+        let mut string = String::from(last_char);
+        while let Some(current_char) = self.next_character()
+            && (current_char.is_ascii_alphabetic() || current_char.is_ascii_digit() || current_char == '_')
+        {
+            string.push(current_char);
+        }
+        self.index -= 1;
+
+		if string.is_empty() {
+			return None;
+		}
+
+		let token = match string.as_str() {
+			"auto" => Token::Keyword(TokenKeyword::Auto),
+			"break" => Token::Keyword(TokenKeyword::Break),
+			"case" => Token::Keyword(TokenKeyword::Case),
+			"char" => Token::Keyword(TokenKeyword::Char),
+			"const" => Token::Keyword(TokenKeyword::Const),
+			"continue" => Token::Keyword(TokenKeyword::Continue),
+			"default" => Token::Keyword(TokenKeyword::Default),
+			"do" => Token::Keyword(TokenKeyword::Do),
+			"double" => Token::Keyword(TokenKeyword::Double),
+			"else" => Token::Keyword(TokenKeyword::Else),
+			"enum" => Token::Keyword(TokenKeyword::Enum),
+			"extern" => Token::Keyword(TokenKeyword::Extern),
+			"float" => Token::Keyword(TokenKeyword::Float),
+			"for" => Token::Keyword(TokenKeyword::For),
+			"goto" => Token::Keyword(TokenKeyword::Goto),
+			"if" => Token::Keyword(TokenKeyword::If),
+			"inline" => Token::Keyword(TokenKeyword::Inline),
+			"int" => Token::Keyword(TokenKeyword::Int),
+			"long" => Token::Keyword(TokenKeyword::Long),
+			"register" => Token::Keyword(TokenKeyword::Register),
+			"restrict" => Token::Keyword(TokenKeyword::Restrict),
+			"return" => Token::Keyword(TokenKeyword::Return),
+			"short" => Token::Keyword(TokenKeyword::Short),
+			"signed" => Token::Keyword(TokenKeyword::Signed),
+			"sizeof" => Token::Keyword(TokenKeyword::Sizeof),
+			"static" => Token::Keyword(TokenKeyword::Static),
+			"struct" => Token::Keyword(TokenKeyword::Struct),
+			"switch" => Token::Keyword(TokenKeyword::Switch),
+			"typedef" => Token::Keyword(TokenKeyword::Typedef),
+			"union" => Token::Keyword(TokenKeyword::Union),
+			"unsigned" => Token::Keyword(TokenKeyword::Unsigned),
+			"void" => Token::Keyword(TokenKeyword::Void),
+			"volatile" => Token::Keyword(TokenKeyword::Volatile),
+			"while" => Token::Keyword(TokenKeyword::While),
+			"_Bool" => Token::Keyword(TokenKeyword::Bool),
+			"_Complex" => Token::Keyword(TokenKeyword::Complex),
+			"_Imaginary" => Token::Keyword(TokenKeyword::Imaginary),
+			other => Token::Identifier(other.into())
+		};
+		Some(token)
+	}
+
     pub fn next_token(&mut self) -> Option<Token> {
         self.skip_whitespace();
         if let Some(next_character) = self.next_character() {
@@ -457,6 +707,11 @@ impl Tokenizer {
                     if self.peek(0) == Some('.') && self.peek(1) == Some('.') {
                         self.index += 2;
                         Some(Token::Punctuator(TokenPunctuator::Ellipsis))
+                    } else if let Some(next) = self.peek(0)
+                        && next.is_ascii_digit()
+                        && let Some(num) = self.next_number_constant(next)
+                    {
+                        Some(Token::Constant(num))
                     } else {
                         Some(Token::Punctuator(TokenPunctuator::Dot))
                     }
@@ -633,11 +888,17 @@ impl Tokenizer {
                     let str = self.next_string('\'');
                     Some(Token::Constant(TokenConstant::Character(str)))
                 }
+                c @ '0'..='9' | c @ '.' => self.next_number_constant(c).map(|x| Token::Constant(x)),
+				c @ '_' | c @ 'A'..='Z' | c @ 'a'..='z' => self.next_keyword_or_identifier(c),
                 _ => None,
             }
         } else {
             None
         }
+    }
+
+    pub fn end_of_stream(&self) -> bool {
+        self.index >= self.source.len()
     }
     // pub fn next_preprocessing_token() -> PreprocessingToken {}
 }
@@ -647,8 +908,12 @@ pub fn tokenize(source: &str) -> Vec<Token> {
     let mut out_vec = Vec::new();
     let mut tokenizer = Tokenizer::new(source);
 
-    while let Some(token) = tokenizer.next_token() {
-        out_vec.push(token);
+    println!("Source: \n{}", source);
+
+    while !tokenizer.end_of_stream() {
+        if let Some(token) = tokenizer.next_token() {
+            out_vec.push(token);
+        }
     }
 
     out_vec
