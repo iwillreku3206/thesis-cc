@@ -1,7 +1,7 @@
 pub mod error;
 pub mod preprocess;
 pub mod std;
-pub mod tokenize;
+pub mod tokenizer;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

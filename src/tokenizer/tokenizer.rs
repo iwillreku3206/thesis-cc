@@ -1,246 +1,6 @@
 use std::str::Chars;
 
-/// Keywords, as defined in Section 6.4.1 of the C99 standard draft (N1256, page 50)
-#[derive(Debug)]
-pub enum TokenKeyword {
-    Auto,
-    Break,
-    Case,
-    Char,
-    Const,
-    Continue,
-    Default,
-    Do,
-    Double,
-    Else,
-    Enum,
-    Extern,
-    Float,
-    For,
-    Goto,
-    If,
-    Inline,
-    Int,
-    Long,
-    Register,
-    Restrict,
-    Return,
-    Short,
-    Signed,
-    Sizeof,
-    Static,
-    Struct,
-    Switch,
-    Typedef,
-    Union,
-    Unsigned,
-    Void,
-    Volatile,
-    While,
-    Bool,
-    Complex,
-    Imaginary,
-}
-
-/// Constants, as defined in Section 6.4.4 of the C99 standard draft (N1256, page 54)
-#[derive(Debug)]
-pub enum TokenConstant {
-    /// Decimal constant (`[1-9][0-9]*`), octal constant (`0[0-7]*`) or hexadecimal constant (`0x|X[0-9a-fA-F]+`)
-    /// followed by an optional suffix (`(([uU][lL]{1,2})|([lL]{1,2}[uU]))+`)
-    Integer(u64),
-    /// Decimal floating constant (`(([0-9]*\.[0-9]+([eE][0-9]+)?)|([0-9]+[eE][0-9]+))[fFlL]`), or
-    /// Hexadecimal floating constant
-    /// (`0x(([0-9A-Fa-f]*\.[0-9A-Fa-f]+)|([0-9A-Fa-f]*\.))p[\+\-]?[0-9A-Fa-f]*[flFL]?`)
-    Floating(String),
-    /// Enumeration constant (identifier)
-    Enumeration(String),
-    /// Character constant (`L?'([^'\\\n]|\\['"?\\abfnrtv]|\\[0-7]{1,3}|\x[0-9A-Fa-f]+)+'`)
-    Character(Vec<u8>),
-}
-
-/// Punctuators, as defined in Section 6.4.6 of the C99 standard draft (N1256, page 63)
-#[derive(Debug)]
-pub enum TokenPunctuator {
-    /// The `[` or `<:` symbol
-    LeftBracket,
-    /// The `]` or `:>` symbol
-    RightBracket,
-    /// The `(` symbol
-    LeftParen,
-    /// The `)` symbol
-    RightParen,
-    /// The `{` or `<% symbol
-    LeftBrace,
-    /// The `}` or `%>` symbol
-    RightBrace,
-    /// The `.` symbol
-    Dot,
-    /// The `->` symbol
-    Arrow,
-
-    /// The `++` symbol
-    Increment,
-    /// The `--` symbol
-    Decrement,
-    /// The `&` symbol
-    Ampersand,
-    /// The `*` symbol
-    Asterisk,
-    /// The `+` symbol
-    Plus,
-    /// The `-` symbol
-    Minus,
-    /// The `~` symbol
-    Tilde,
-    /// The `!` symbol
-    Exclamation,
-
-    /// The `/` symbol
-    Slash,
-    /// The `%` symbol
-    Percent,
-    /// The `<<` symbol
-    ShiftLeft,
-    /// The `>>` symbol
-    ShiftRight,
-    /// The `<` symbol
-    Less,
-    /// The `>` symbol
-    Greater,
-    /// The `<=` symbol
-    LessEqual,
-    /// The `>=` symbol
-    GreaterEqual,
-    /// The `==` symbol
-    Equality,
-    /// The `!=` symbol
-    NotEquality,
-    /// The `^` symbol
-    Caret,
-    /// The `|` symbol
-    Pipe,
-    /// The `&&` symbol
-    BooleanAnd,
-    /// The `||` symbol
-    BooleanOr,
-
-    /// The `?` symbol
-    Question,
-    /// The `:` symbol
-    Colon,
-    /// The `;` symbol
-    Semicolon,
-    /// The `...` symbol
-    Ellipsis,
-
-    /// The `=` symbol
-    Equal,
-    /// The `*=` symbol
-    AsteriskAssign,
-    /// The `/=` symbol
-    SlashAssign,
-    /// The `%=` symbol
-    PercentAssign,
-    /// The `+=` symbol
-    PlusAssign,
-    /// The `-=` symbol
-    MinusAssign,
-    /// The `<<=` symbol
-    ShiftLeftAssign,
-    /// The `>>=` symbol
-    ShiftRightAssign,
-    /// The `&=` symbol
-    BitwiseAndAssign,
-    /// The `^=` symbol
-    BitwiseXorAssign,
-    /// The `|=` symbol
-    BitwiseOrAssign,
-
-    /// The `,` symbol
-    Comma,
-    /// The `#` or `%:` symbol
-    Hash,
-    /// The `##` or `%:%:` symbol
-    DoubleHash,
-}
-
-#[derive(Debug)]
-pub enum Token {
-    /// Keyword, as defined in Section 6.4.1 of the C99 standard draft (N1256, page 50)
-    Keyword(TokenKeyword),
-
-    /// Identifier, as defined in Section 6.4.2 of the C99 standard draft (N1256, page 51)
-    /// Non-digit (`[A-Za-z_]`) followed by non-digit or digit (`[A-Za-z_0-9]`)
-    Identifier(String),
-
-    /// Constant, as defined in Section 6.4.4 of the C99 standard draft (N1256, page 54)
-    Constant(TokenConstant),
-
-    /// String literal, as defined in Section 6.4.5 of the C99 standard draft (N1256, page 62)
-    /// The `bool` value is true if the string literal is a wide string literal
-    /// Defined as `L?"([^'\\\n]|\\['"?\\abfnrtv]|\\[0-7]{1,3}|\x[0-9A-Fa-f]+)+"`
-    StringLiteral(Vec<u8>, bool),
-
-    /// Punctuator, as defined in Section 6.4.6 of the C99 standard draft (N1256, page 63)
-    Punctuator(TokenPunctuator),
-}
-
-#[derive(Debug)]
-pub enum PPNumberToken {
-    /// Decimal constant (`[1-9][0-9]*`), octal constant (`0[0-7]*`) or hexadecimal constant (`0x|X[0-9a-fA-F]+`)
-    /// followed by an optional suffix (`(([uU][lL]{1,2})|([lL]{1,2}[uU]))+`)
-    Integer(String),
-    /// Decimal floating constant (`(([0-9]*\.[0-9]+([eE][0-9]+)?)|([0-9]+[eE][0-9]+))[fFlL]`), or
-    /// Hexadecimal floating constant
-    /// (`0x(([0-9A-Fa-f]*\.[0-9A-Fa-f]+)|([0-9A-Fa-f]*\.))p[\+\-]?[0-9A-Fa-f]*[flFL]?`)
-    Floating(String),
-}
-
-#[derive(Debug)]
-pub enum PreprocessingToken {
-    /// Header name, as defined in Section 6.4.7 of the C99 standard draft (N1256, page 64)
-    /// Defined as `(<[^>\n]+>)|("[^"\n]+")`
-    /// String includes the quotes and angle brackets
-    HeaderName(String),
-
-    /// Identifier, as defined in Section 6.4.2 of the C99 standard draft (N1256, page 51)
-    /// Non-digit (`[A-Za-z_]`) followed by non-digit or digit (`[A-Za-z_0-9]`)
-    Identifier(String),
-
-    /// Preprocessing numbers, as defined in Section 6.4.8 of the C99 standard draft (N1256, page 65)
-    PPNumber(PPNumberToken),
-
-    /// Character constant (`L?'([^'\\\n]|\\['"?\\abfnrtv]|\\[0-7]{1,3}|\x[0-9A-Fa-f]+)+'`)
-    CharacterConstant(String),
-
-    /// String literal, as defined in Section 6.4.5 of the C99 standard draft (N1256, page 62)
-    /// The `bool` value is true if the string literal is a wide string literal
-    /// Defined as `L?"([^'\\\n]|\\['"?\\abfnrtv]|\\[0-7]{1,3}|\x[0-9A-Fa-f]+)+"`
-    StringLiteral(String, bool),
-
-    /// Punctuator, as defined in Section 6.4.6 of the C99 standard draft (N1256, page 63)
-    Punctuator(TokenPunctuator),
-
-    /// As defined in Section 6.4 of the C99 standard draft (N1256, page 49), preprocessing tokens
-    /// include "each non-white-space character that cannot be one of the above"
-    NonWhitespace,
-}
-
-#[derive(Debug)]
-enum TokenizationIssue {
-    UnknownEscapeSequence(String),
-    UnterminatedString,
-    OutOfRange,
-    MissingHexadecimalDigits,
-    HexadecimalFloatWithoutExponent,
-}
-
-#[derive(Debug)]
-enum NumericalSuffix {
-    Unsigned,
-    Long,
-    LongLong,
-}
+use crate::tokenizer::{preprocess_token::PreprocessingToken, token::{Constant, Keyword, NumericalSuffix, Punctuator, Token}, TokenizationIssue};
 
 #[derive(Debug)]
 struct Tokenizer {
@@ -521,11 +281,9 @@ impl Tokenizer {
         return string;
     }
 
-    fn next_number_constant(&mut self, char: char) -> Option<TokenConstant> {
-        let mut characters_peeked = 0;
+    fn next_number_constant(&mut self, char: char) -> Option<Constant> {
         match char {
             '0' => {
-                characters_peeked += 1;
                 match self.peek(0) {
                     Some('x') | Some('X') => {
                         let mut is_float = false;
@@ -601,14 +359,14 @@ impl Tokenizer {
                         if is_float {
 							return None; // TODO: Implement
                         } else {
-                            return Some(TokenConstant::Integer(
+                            return Some(Constant::Integer(
                                 u64::from_str_radix(parts.get(0)?, 16)
                                     .expect("This should be a valid integer. Report this."),
                             ));
                         };
                     }
                     _ => {
-                        return Some(TokenConstant::Integer(
+                        return Some(Constant::Integer(
                             u64::from_str_radix(
                                 &self.next_oct_digit_sequence().unwrap_or("0".into()),
                                 8,
@@ -629,7 +387,7 @@ impl Tokenizer {
 					return None; // TODO: implement
                     /* float_dec */
                 } else {
-					return Some(TokenConstant::Integer(u64::from_str_radix(&format!("{}{}", first, digits?), 10).expect("This should be a valid integer. Report this."))); // TODO: Suffix
+					return Some(Constant::Integer(u64::from_str_radix(&format!("{}{}", first, digits?), 10).expect("This should be a valid integer. Report this."))); // TODO: Suffix
                 }
             }
             '.' => { return None; /* float_dec*/ } // TODO: implement
@@ -651,43 +409,43 @@ impl Tokenizer {
 		}
 
 		let token = match string.as_str() {
-			"auto" => Token::Keyword(TokenKeyword::Auto),
-			"break" => Token::Keyword(TokenKeyword::Break),
-			"case" => Token::Keyword(TokenKeyword::Case),
-			"char" => Token::Keyword(TokenKeyword::Char),
-			"const" => Token::Keyword(TokenKeyword::Const),
-			"continue" => Token::Keyword(TokenKeyword::Continue),
-			"default" => Token::Keyword(TokenKeyword::Default),
-			"do" => Token::Keyword(TokenKeyword::Do),
-			"double" => Token::Keyword(TokenKeyword::Double),
-			"else" => Token::Keyword(TokenKeyword::Else),
-			"enum" => Token::Keyword(TokenKeyword::Enum),
-			"extern" => Token::Keyword(TokenKeyword::Extern),
-			"float" => Token::Keyword(TokenKeyword::Float),
-			"for" => Token::Keyword(TokenKeyword::For),
-			"goto" => Token::Keyword(TokenKeyword::Goto),
-			"if" => Token::Keyword(TokenKeyword::If),
-			"inline" => Token::Keyword(TokenKeyword::Inline),
-			"int" => Token::Keyword(TokenKeyword::Int),
-			"long" => Token::Keyword(TokenKeyword::Long),
-			"register" => Token::Keyword(TokenKeyword::Register),
-			"restrict" => Token::Keyword(TokenKeyword::Restrict),
-			"return" => Token::Keyword(TokenKeyword::Return),
-			"short" => Token::Keyword(TokenKeyword::Short),
-			"signed" => Token::Keyword(TokenKeyword::Signed),
-			"sizeof" => Token::Keyword(TokenKeyword::Sizeof),
-			"static" => Token::Keyword(TokenKeyword::Static),
-			"struct" => Token::Keyword(TokenKeyword::Struct),
-			"switch" => Token::Keyword(TokenKeyword::Switch),
-			"typedef" => Token::Keyword(TokenKeyword::Typedef),
-			"union" => Token::Keyword(TokenKeyword::Union),
-			"unsigned" => Token::Keyword(TokenKeyword::Unsigned),
-			"void" => Token::Keyword(TokenKeyword::Void),
-			"volatile" => Token::Keyword(TokenKeyword::Volatile),
-			"while" => Token::Keyword(TokenKeyword::While),
-			"_Bool" => Token::Keyword(TokenKeyword::Bool),
-			"_Complex" => Token::Keyword(TokenKeyword::Complex),
-			"_Imaginary" => Token::Keyword(TokenKeyword::Imaginary),
+			"auto" => Token::Keyword(Keyword::Auto),
+			"break" => Token::Keyword(Keyword::Break),
+			"case" => Token::Keyword(Keyword::Case),
+			"char" => Token::Keyword(Keyword::Char),
+			"const" => Token::Keyword(Keyword::Const),
+			"continue" => Token::Keyword(Keyword::Continue),
+			"default" => Token::Keyword(Keyword::Default),
+			"do" => Token::Keyword(Keyword::Do),
+			"double" => Token::Keyword(Keyword::Double),
+			"else" => Token::Keyword(Keyword::Else),
+			"enum" => Token::Keyword(Keyword::Enum),
+			"extern" => Token::Keyword(Keyword::Extern),
+			"float" => Token::Keyword(Keyword::Float),
+			"for" => Token::Keyword(Keyword::For),
+			"goto" => Token::Keyword(Keyword::Goto),
+			"if" => Token::Keyword(Keyword::If),
+			"inline" => Token::Keyword(Keyword::Inline),
+			"int" => Token::Keyword(Keyword::Int),
+			"long" => Token::Keyword(Keyword::Long),
+			"register" => Token::Keyword(Keyword::Register),
+			"restrict" => Token::Keyword(Keyword::Restrict),
+			"return" => Token::Keyword(Keyword::Return),
+			"short" => Token::Keyword(Keyword::Short),
+			"signed" => Token::Keyword(Keyword::Signed),
+			"sizeof" => Token::Keyword(Keyword::Sizeof),
+			"static" => Token::Keyword(Keyword::Static),
+			"struct" => Token::Keyword(Keyword::Struct),
+			"switch" => Token::Keyword(Keyword::Switch),
+			"typedef" => Token::Keyword(Keyword::Typedef),
+			"union" => Token::Keyword(Keyword::Union),
+			"unsigned" => Token::Keyword(Keyword::Unsigned),
+			"void" => Token::Keyword(Keyword::Void),
+			"volatile" => Token::Keyword(Keyword::Volatile),
+			"while" => Token::Keyword(Keyword::While),
+			"_Bool" => Token::Keyword(Keyword::Bool),
+			"_Complex" => Token::Keyword(Keyword::Complex),
+			"_Imaginary" => Token::Keyword(Keyword::Imaginary),
 			other => Token::Identifier(other.into())
 		};
 		Some(token)
@@ -697,198 +455,200 @@ impl Tokenizer {
         self.skip_whitespace();
         if let Some(next_character) = self.next_character() {
             match next_character {
-                '[' => Some(Token::Punctuator(TokenPunctuator::LeftBracket)),
-                ']' => Some(Token::Punctuator(TokenPunctuator::RightBracket)),
-                '(' => Some(Token::Punctuator(TokenPunctuator::LeftParen)),
-                ')' => Some(Token::Punctuator(TokenPunctuator::RightParen)),
-                '{' => Some(Token::Punctuator(TokenPunctuator::LeftBrace)),
-                '}' => Some(Token::Punctuator(TokenPunctuator::RightBrace)),
+                '[' => Some(Token::Punctuator(Punctuator::LeftBracket)),
+                ']' => Some(Token::Punctuator(Punctuator::RightBracket)),
+                '(' => Some(Token::Punctuator(Punctuator::LeftParen)),
+                ')' => Some(Token::Punctuator(Punctuator::RightParen)),
+                '{' => Some(Token::Punctuator(Punctuator::LeftBrace)),
+                '}' => Some(Token::Punctuator(Punctuator::RightBrace)),
                 '.' => {
                     if self.peek(0) == Some('.') && self.peek(1) == Some('.') {
                         self.index += 2;
-                        Some(Token::Punctuator(TokenPunctuator::Ellipsis))
+                        Some(Token::Punctuator(Punctuator::Ellipsis))
                     } else if let Some(next) = self.peek(0)
                         && next.is_ascii_digit()
                         && let Some(num) = self.next_number_constant(next)
                     {
                         Some(Token::Constant(num))
                     } else {
-                        Some(Token::Punctuator(TokenPunctuator::Dot))
+                        Some(Token::Punctuator(Punctuator::Dot))
                     }
                 }
                 '-' => {
                     self.index += 1;
                     match self.peek(0) {
-                        Some('>') => Some(Token::Punctuator(TokenPunctuator::Arrow)),
-                        Some('-') => Some(Token::Punctuator(TokenPunctuator::Decrement)),
-                        Some('=') => Some(Token::Punctuator(TokenPunctuator::MinusAssign)),
+                        Some('>') => Some(Token::Punctuator(Punctuator::Arrow)),
+                        Some('-') => Some(Token::Punctuator(Punctuator::Decrement)),
+                        Some('=') => Some(Token::Punctuator(Punctuator::MinusAssign)),
                         _ => {
                             self.index -= 1;
-                            Some(Token::Punctuator(TokenPunctuator::Minus))
+                            Some(Token::Punctuator(Punctuator::Minus))
                         }
                     }
                 }
                 '+' => {
                     self.index += 1;
                     match self.peek(0) {
-                        Some('+') => Some(Token::Punctuator(TokenPunctuator::Increment)),
-                        Some('=') => Some(Token::Punctuator(TokenPunctuator::PlusAssign)),
+                        Some('+') => Some(Token::Punctuator(Punctuator::Increment)),
+                        Some('=') => Some(Token::Punctuator(Punctuator::PlusAssign)),
                         _ => {
                             self.index -= 1;
-                            Some(Token::Punctuator(TokenPunctuator::Plus))
+                            Some(Token::Punctuator(Punctuator::Plus))
                         }
                     }
                 }
                 '&' => {
                     self.index += 1;
                     match self.peek(0) {
-                        Some('&') => Some(Token::Punctuator(TokenPunctuator::BooleanAnd)),
-                        Some('=') => Some(Token::Punctuator(TokenPunctuator::BitwiseAndAssign)),
+                        Some('&') => Some(Token::Punctuator(Punctuator::BooleanAnd)),
+                        Some('=') => Some(Token::Punctuator(Punctuator::BitwiseAndAssign)),
                         _ => {
                             self.index -= 1;
-                            Some(Token::Punctuator(TokenPunctuator::Ampersand))
+                            Some(Token::Punctuator(Punctuator::Ampersand))
                         }
                     }
                 }
                 '*' => {
                     self.index += 1;
                     match self.peek(0) {
-                        Some('=') => Some(Token::Punctuator(TokenPunctuator::AsteriskAssign)),
+                        Some('=') => Some(Token::Punctuator(Punctuator::AsteriskAssign)),
                         _ => {
                             self.index -= 1;
-                            Some(Token::Punctuator(TokenPunctuator::Asterisk))
+                            Some(Token::Punctuator(Punctuator::Asterisk))
                         }
                     }
                 }
-                '~' => Some(Token::Punctuator(TokenPunctuator::Tilde)),
+                '~' => Some(Token::Punctuator(Punctuator::Tilde)),
                 '!' => {
                     self.index += 1;
                     match self.peek(0) {
-                        Some('=') => Some(Token::Punctuator(TokenPunctuator::NotEquality)),
+                        Some('=') => Some(Token::Punctuator(Punctuator::NotEquality)),
                         _ => {
                             self.index -= 1;
-                            Some(Token::Punctuator(TokenPunctuator::Exclamation))
+                            Some(Token::Punctuator(Punctuator::Exclamation))
                         }
                     }
                 }
                 '/' => {
                     self.index += 1;
                     match self.peek(0) {
-                        Some('=') => Some(Token::Punctuator(TokenPunctuator::SlashAssign)),
+                        Some('=') => Some(Token::Punctuator(Punctuator::SlashAssign)),
+						Some('/') => { self.skip_line(); None },
+						Some('*') => { self.skip_comment(); None },
                         _ => {
                             self.index -= 1;
-                            Some(Token::Punctuator(TokenPunctuator::Slash))
+                            Some(Token::Punctuator(Punctuator::Slash))
                         }
                     }
                 }
                 '%' => match self.peek(0) {
                     Some('=') => {
                         self.index += 1;
-                        Some(Token::Punctuator(TokenPunctuator::PercentAssign))
+                        Some(Token::Punctuator(Punctuator::PercentAssign))
                     }
                     Some('>') => {
                         self.index += 1;
-                        Some(Token::Punctuator(TokenPunctuator::RightBrace))
+                        Some(Token::Punctuator(Punctuator::RightBrace))
                     }
                     Some(':') => {
                         if self.peek(1) == Some('%') && self.peek(2) == Some(':') {
                             self.index += 3;
-                            Some(Token::Punctuator(TokenPunctuator::DoubleHash))
+                            Some(Token::Punctuator(Punctuator::DoubleHash))
                         } else {
                             self.index += 1;
-                            Some(Token::Punctuator(TokenPunctuator::Hash))
+                            Some(Token::Punctuator(Punctuator::Hash))
                         }
                     }
-                    _ => Some(Token::Punctuator(TokenPunctuator::Percent)),
+                    _ => Some(Token::Punctuator(Punctuator::Percent)),
                 },
                 '>' => match self.peek(0) {
                     Some('>') => {
                         self.index += 1;
                         if self.peek(1) == Some('=') {
                             self.index += 1;
-                            Some(Token::Punctuator(TokenPunctuator::ShiftRightAssign))
+                            Some(Token::Punctuator(Punctuator::ShiftRightAssign))
                         } else {
-                            Some(Token::Punctuator(TokenPunctuator::ShiftRight))
+                            Some(Token::Punctuator(Punctuator::ShiftRight))
                         }
                     }
-                    Some('=') => Some(Token::Punctuator(TokenPunctuator::GreaterEqual)),
-                    _ => Some(Token::Punctuator(TokenPunctuator::Greater)),
+                    Some('=') => Some(Token::Punctuator(Punctuator::GreaterEqual)),
+                    _ => Some(Token::Punctuator(Punctuator::Greater)),
                 },
                 '<' => match self.peek(0) {
                     Some('<') => {
                         self.index += 1;
                         if self.peek(1) == Some('=') {
                             self.index += 1;
-                            Some(Token::Punctuator(TokenPunctuator::ShiftLeftAssign))
+                            Some(Token::Punctuator(Punctuator::ShiftLeftAssign))
                         } else {
-                            Some(Token::Punctuator(TokenPunctuator::ShiftLeft))
+                            Some(Token::Punctuator(Punctuator::ShiftLeft))
                         }
                     }
                     Some('=') => {
                         self.index += 1;
-                        Some(Token::Punctuator(TokenPunctuator::LessEqual))
+                        Some(Token::Punctuator(Punctuator::LessEqual))
                     }
                     Some(':') => {
                         self.index += 1;
-                        Some(Token::Punctuator(TokenPunctuator::LeftBracket))
+                        Some(Token::Punctuator(Punctuator::LeftBracket))
                     }
                     Some('%') => {
                         self.index += 1;
-                        Some(Token::Punctuator(TokenPunctuator::LeftBrace))
+                        Some(Token::Punctuator(Punctuator::LeftBrace))
                     }
-                    _ => Some(Token::Punctuator(TokenPunctuator::Less)),
+                    _ => Some(Token::Punctuator(Punctuator::Less)),
                 },
                 '=' => match self.peek(0) {
                     Some('=') => {
                         self.index += 1;
-                        Some(Token::Punctuator(TokenPunctuator::Equality))
+                        Some(Token::Punctuator(Punctuator::Equality))
                     }
-                    _ => Some(Token::Punctuator(TokenPunctuator::Equal)),
+                    _ => Some(Token::Punctuator(Punctuator::Equal)),
                 },
                 '^' => match self.peek(0) {
                     Some('=') => {
                         self.index += 1;
-                        Some(Token::Punctuator(TokenPunctuator::BitwiseXorAssign))
+                        Some(Token::Punctuator(Punctuator::BitwiseXorAssign))
                     }
-                    _ => Some(Token::Punctuator(TokenPunctuator::Caret)),
+                    _ => Some(Token::Punctuator(Punctuator::Caret)),
                 },
                 '|' => match self.peek(0) {
                     Some('=') => {
                         self.index += 1;
-                        Some(Token::Punctuator(TokenPunctuator::BitwiseOrAssign))
+                        Some(Token::Punctuator(Punctuator::BitwiseOrAssign))
                     }
                     Some('|') => {
                         self.index += 1;
-                        Some(Token::Punctuator(TokenPunctuator::BooleanOr))
+                        Some(Token::Punctuator(Punctuator::BooleanOr))
                     }
-                    _ => Some(Token::Punctuator(TokenPunctuator::BitwiseOrAssign)),
+                    _ => Some(Token::Punctuator(Punctuator::BitwiseOrAssign)),
                 },
-                '?' => Some(Token::Punctuator(TokenPunctuator::Question)),
+                '?' => Some(Token::Punctuator(Punctuator::Question)),
                 ':' => match self.peek(0) {
                     Some('>') => {
                         self.index += 1;
-                        Some(Token::Punctuator(TokenPunctuator::RightBracket))
+                        Some(Token::Punctuator(Punctuator::RightBracket))
                     }
-                    _ => Some(Token::Punctuator(TokenPunctuator::Colon)),
+                    _ => Some(Token::Punctuator(Punctuator::Colon)),
                 },
-                ';' => Some(Token::Punctuator(TokenPunctuator::Semicolon)),
+                ';' => Some(Token::Punctuator(Punctuator::Semicolon)),
                 '#' => match self.peek(0) {
                     Some('#') => {
                         self.index += 1;
-                        Some(Token::Punctuator(TokenPunctuator::DoubleHash))
+                        Some(Token::Punctuator(Punctuator::DoubleHash))
                     }
-                    _ => Some(Token::Punctuator(TokenPunctuator::Hash)),
+                    _ => Some(Token::Punctuator(Punctuator::Hash)),
                 },
-                ',' => Some(Token::Punctuator(TokenPunctuator::Comma)),
+                ',' => Some(Token::Punctuator(Punctuator::Comma)),
                 '"' => {
                     let str = self.next_string('"');
                     Some(Token::StringLiteral(str, false))
                 }
                 '\'' => {
                     let str = self.next_string('\'');
-                    Some(Token::Constant(TokenConstant::Character(str)))
+                    Some(Token::Constant(Constant::Character(str)))
                 }
-                c @ '0'..='9' | c @ '.' => self.next_number_constant(c).map(|x| Token::Constant(x)),
+                c @ '0'..='9' => self.next_number_constant(c).map(|x| Token::Constant(x)),
 				c @ '_' | c @ 'A'..='Z' | c @ 'a'..='z' => self.next_keyword_or_identifier(c),
                 _ => None,
             }
@@ -897,10 +657,21 @@ impl Tokenizer {
         }
     }
 
+	pub fn next_preprocessor_token(&mut self) -> Option<PreprocessingToken> {
+		//match self.next_character() {
+		//	Some('<') => self.next_string('>'),
+		//};
+
+		None
+	}
+
     pub fn end_of_stream(&self) -> bool {
         self.index >= self.source.len()
     }
-    // pub fn next_preprocessing_token() -> PreprocessingToken {}
+
+	pub fn issues(&self) -> &Vec<(usize, TokenizationIssue)> {
+		&self.emitted_issues
+	}
 }
 
 //fn preprocess_tokenize(source: &str) -> Vec<PreprocessingToken> {}
@@ -909,6 +680,7 @@ pub fn tokenize(source: &str) -> Vec<Token> {
     let mut tokenizer = Tokenizer::new(source);
 
     println!("Source: \n{}", source);
+	println!("Issues: {:?}", tokenizer.issues());
 
     while !tokenizer.end_of_stream() {
         if let Some(token) = tokenizer.next_token() {
